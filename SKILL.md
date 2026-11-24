@@ -185,24 +185,45 @@ description: 科研选题/创新点诊断器。当用户提出一个研究想法
 
 ## 输出的诊断报告结构
 
-固定为以下 12 节（模板见 `templates/report_template.html`）：
+### 第一条规则：首页必须能独立决策
 
-1. **一句话结论**（可行/条件可行/不可行 + 核心理由，≤100 字）
-2. **命题拆解**（阶段 0 的四坐标）
-3. **新颖性检索结果**（表格 + 判定，**标注核实状态**）
-4. **现状分析**（竞品格局、SOTA 数字、差距量化）
-5. **三关研判**（逐关通过/不通过 + 理由）
-6. **框架重定位**（原命题 vs 重定位后命题，以及为什么必须换）
-7. **分档评级表**（高/中/低 × 必做/应做/可做）
-8. **实验方案矩阵**（含零代码基线、回归组、反命题组）
-9. **周期排期**（含决策点与决策规则）
-10. **止损条件表**
-11. **文献推荐**（分"必读/对标/背景"三类，附链接与一句话说明）
-12. **已知空白与风险**（诚实列出未核实项）
+报告是**一份文档，两种密度**，不是两篇文档：
 
-第 12 节不可省略。**任何诊断都有未核实的部分，隐瞒它就是制造未来的返工。**
+| 部分 | 内容 | 排版 |
+|---|---|---|
+| **第 1 页** | 结论、致命点（≤3 条）、可行路径、分档、止损、未核实 | 紧凑 |
+| **第 2 页起** | 检索明细、源码事实、实验矩阵、周期、文献、风险 | 常规 |
 
----
+**判断标准**：只看第 1 页，读者应能回答"能不能做、难在哪、先做哪一步、什么时候撤"。
+装不下就续到第 2 页，**不要为了压成页而删掉结论**。
+
+首页与补充材料之间用 Markdown 的一行分隔线切分，导出时加 `--digest`。
+
+### 第 1 页包含（六项，缺一不可）
+
+1. **一句话结论**（可行 / 条件可行 / 不可行 + 核心理由）
+2. **致命点**（≤3 条，每条一句话说清威胁与量级）
+3. **可行路径**（若需换框架，写清换什么）
+4. **分档表**（高 / 中 / 低 / 旁路，含概率、周期、前提）
+5. **止损条件**（带数值阈值）
+6. **未核实项**（一句话交代检索限制）
+
+### 补充材料包含（12 节完整版）
+
+1. 命题拆解（问题 / 干预 / 指标 / 竞品 四坐标）
+2. 源码或原文层面的关键事实
+3. 新颖性检索明细（逐篇判定：终止 / 降级 / 安全）
+4. 现状与可对标数字
+5. 三关研判逐项理由
+6. 框架重定位（原命题 vs 重定位后命题）
+7. 分档评级明细（每档的必做 / 应做 / 可做）
+8. 实验矩阵（含零代码基线、回归组、反命题组）
+9. 周期排期（含决策点与决策规则）
+10. 止损条件表
+11. 文献推荐（必读 / 对标 / 背景）
+12. 已知空白与风险
+
+**第 12 节不可省略。** 任何诊断都有未核实的部分，隐瞒它就是制造未来的返工。
 
 ## 质检清单（输出前自查）
 
@@ -235,23 +256,40 @@ description: 科研选题/创新点诊断器。当用户提出一个研究想法
 ## 文件说明
 
 ```
-SKILL.md                      本文件：流程与判据
-scripts/arxiv_probe.py        新颖性检索（带限速与去重）
-scripts/build_report.py       Markdown/HTML → PDF（Chrome headless）
-templates/report_template.html  诊断报告模板（12 节，可打印）
-templates/experiment_matrix.md  实验矩阵与周期设计模板
-docs/diagnostic_lenses.md     诊断视角手册：六类常见余量与重定位路径详解
-examples/                      已完成的诊断样例（含一次真实诊断）
+SKILL.md                        本文件：流程与判据
+docs/diagnostic_lenses.md       六类诊断视角 + 组合路径
+docs/probe_result_sample.md     一次真实检索记录（含限速失败，作为证据）
+templates/report_template.md    报告骨架（首页 + 补充材料）
+templates/experiment_matrix.md  实验矩阵 / 周期 / 止损模板
+scripts/arxiv_probe.py          新颖性检索（限速 + 退避 + 去重）
+scripts/build_report.py         Markdown → PDF（Typst 引擎）
+examples/                       一次完整真实诊断（11 页）
 ```
 
-## 导出的两种方式
-
-**方式一（推荐，无需依赖）**：生成自包含 HTML → Chrome headless 打印为 PDF。
+## 导出
 
 ```bash
-python scripts/build_report.py --html report.html --pdf report.pdf
+pip install typst
+
+# 默认：首页速览 + 补充材料（推荐）
+python scripts/build_report.py --md report.md --pdf report.pdf --digest \
+    --meta "对象 · 日期 · 说明"
+
+# 传统长报告（带封面与目录）
+python scripts/build_report.py --md report.md --pdf report.pdf --toc
 ```
 
-**方式二**：Markdown 源 → HTML（内置极简转换）→ PDF。适合快速出稿。
+**渲染引擎是 Typst，不是浏览器内核。** 选型理由：WeasyPrint 在 Windows 缺
+`libgobject-2.0-0` 无法 import；Chrome headless 依赖浏览器且 `@page` 页边距框不支持；
+Typst 自带引擎，排版接近 LaTeX（两端对齐、首行缩进、中文断行、自动目录、页码、
+表格重复表头、避免孤行）。
 
-PDF 会保留可选中文字、页眉页脚、页码。若中文字体缺失，脚本会自动注入系统中文字体回退链。
+已验证的坑（复现时的常见失败点）：
+
+- `typst.compile()` 只接受**文件路径**，传源码字符串会报路径 canonicalize 错误；
+- `raw()` 的内容必须是**字符串**，写成 fence 形式会报 `expected string, found content`；
+- `block()` 的 `par(...)` 不能作为参数，必须 `{ set par(...); [...] }`；
+- 0.15 版 `outline()` 不接受 `fill`，`outline.entry` 也不暴露 `body`/`page` 字段；
+- 代码块字体栈必须含中文字体，否则中文注释会掉进 `LiSu`（隶书）；
+- PowerShell 的 `` Set-Content -Encoding UTF8 `` 会写 BOM，读取须用 `utf-8-sig`；
+- **PowerShell 把反引号当转义符**，所以用 PowerShell 写 Markdown 代码围栏会吃掉字符——修文档一律用编辑工具或 Python。
