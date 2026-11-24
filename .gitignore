@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Typst 构建中间产物
+.typst_build/
+*.typ.bak
+
+# 渲染预览与临时图片
+_page*.png
+_pg*.png
+_v*.png
+_w*.png
+_x*.png
+preview*.png
+*.html
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 报告输出（按需保留 examples 下的示例 PDF）
+!examples/*.pdf
