@@ -344,7 +344,25 @@ def md_to_typst(md: str, *, toc: bool = False, drop_first_h1: bool = False) -> s
     return "\n".join(body)
 
 
-def build_typst(md: str, *, title: str, meta: str | None, toc: bool, cover: bool) -> str:
+def build_typst(
+    md: str,
+    *,
+    title: str,
+    meta: str | None,
+    toc: bool,
+    cover: bool,
+    digest: bool = False,
+) -> str:
+    """构建 Typst 源。
+
+    digest=True 时启用「摘要首页 + 补充材料」模式：
+    - 文档中第一个 `# 标题` 之前（或首次出现 `---` 分隔线之前）的内容排为首页速览，
+      用更小字号、更紧行距，保证一页装下；
+    - `---` 之后的内容作为补充材料，用常规字号排版。
+    - 首页若溢出，会自动续到第二页，不截断内容。
+
+    这是推荐用法：**首页可独立决策，后续页面用于查证与执行。**
+    """
     serif, sans, mono = pick_fonts()
     P = PALETTE
 
@@ -360,6 +378,20 @@ def build_typst(md: str, *, title: str, meta: str | None, toc: bool, cover: bool
 
     # 有封面时，正文不再重复一级标题；无封面时保留
     drop_first_h1 = cover or title_from_body
+
+    # ---- 拆分「首页速览」与「补充材料」
+    digest_md = md
+    supplement_md = ""
+    if digest:
+        # 优先用水平线切分；其次用第二个一级标题切分
+        parts = re.split(r"^\s*---+\s*$", md, maxsplit=1, flags=re.M)
+        if len(parts) == 2:
+            digest_md, supplement_md = parts[0], parts[1]
+        else:
+            h1_positions = [m.start() for m in re.finditer(r"^#\s+", md, flags=re.M)]
+            if len(h1_positions) >= 2:
+                digest_md = md[:h1_positions[1]]
+                supplement_md = md[h1_positions[1]:]
 
     cover_block = ""
     if cover:
@@ -487,6 +519,213 @@ def build_typst(md: str, *, title: str, meta: str | None, toc: bool, cover: bool
     return f"{config}\n{cover_block}\n{toc_block}\n{body}\n"
 
 
+def build_digest_typst(
+    md: str,
+    *,
+    title: str,
+    meta: str | None,
+    toc: bool,
+    cover: bool,
+) -> str:
+    """「首页速览 + 补充材料」模式。
+
+    首页用紧凑排版（小字号、紧行距、无首行缩进、标题压缩），
+    保证一页装下结论；补充材料恢复常规排版。
+    首页内容不会被裁掉 —— 装不下就自然续到第二页。
+    """
+    serif, sans, mono = pick_fonts()
+    P = PALETTE
+
+    md = md.lstrip("\n")
+
+    # 标题取自正文首个 h1
+    m_h1 = re.match(r"^#\s+(.+?)\s*$", md.split("\n", 1)[0] if md else "")
+    if m_h1:
+        title = m_h1.group(1).strip() or title
+        md = (md.split("\n", 1)[1] if "\n" in md else "").lstrip("\n")
+
+    # 切分：水平线优先，其次第二个 h1
+    digest_md, supplement_md = md, ""
+    parts = re.split(r"^\s*---+\s*$", md, maxsplit=1, flags=re.M)
+    if len(parts) == 2:
+        digest_md, supplement_md = parts
+    else:
+        h1s = [m.start() for m in re.finditer(r"^#\s+", md, flags=re.M)]
+        if len(h1s) >= 2:
+            digest_md, supplement_md = md[: h1s[1]], md[h1s[1] :]
+
+    digest_body = md_to_typst(digest_md, toc=False, drop_first_h1=True)
+    supp_body = md_to_typst(supplement_md, toc=toc, drop_first_h1=False)
+
+    meta_html = (
+        f'#v(2pt)\n#text(font: {sans}, size: 7.8pt, fill: rgb("{P["ink_faint"]}"))[{esc(meta)}]'
+        if meta
+        else ""
+    )
+
+    # 首页头部
+    header = f"""
+#align(left)[
+  #text(font: {sans}, size: 7.2pt, tracking: 2.6pt, fill: rgb("{P["primary_line"]}"))[RESEARCH IDEA DIAGNOSTIC]
+  #v(3pt)
+  #text(font: {sans}, size: 15.5pt, weight: 700, fill: rgb("{P["primary"]}"))[{esc(title)}]
+  {meta_html}
+  #v(4pt)
+  #line(length: 100%, stroke: 1pt + rgb("{P["primary_line"]}"))
+]
+#v(5pt)
+"""
+
+    config = f"""
+#set document(title: {repr_typst(title)})
+#set page(
+  paper: "a4",
+  margin: (x: 14mm, y: 12mm),
+  numbering: "1 / 1",
+  number-align: center,
+)
+#set text(font: {serif}, size: 10.5pt, lang: "zh", fill: rgb("{P['ink']}"))
+#set par(
+  justify: true,
+  leading: 0.82em,
+  spacing: 1.1em,
+  first-line-indent: (amount: 2em, all: true),
+)
+#set heading(numbering: none)
+#show heading: set par(first-line-indent: 0em, justify: false)
+
+// ---------- 常规版式（补充材料） ----------
+#show heading.where(level: 1): it => {{
+  v(15pt)
+  block(width: 100%,
+    text(font: {sans}, size: 14.5pt, weight: 700, fill: rgb("{P['primary']}"), it.body))
+  v(2pt)
+  line(length: 100%, stroke: 1.4pt + rgb("{P['primary']}"))
+  v(7pt)
+}}
+#show heading.where(level: 2): it => {{
+  v(11pt)
+  block(width: 100%,
+    stack(dir: ltr, spacing: 8pt,
+      line(angle: 90deg, length: 0.95em, stroke: 2.6pt + rgb("{P['primary_line']}")),
+      text(font: {sans}, size: 11.8pt, weight: 700, fill: rgb("{P['secondary']}"), it.body),
+    ))
+  v(4pt)
+}}
+#show heading.where(level: 3): it => {{
+  v(8pt)
+  text(font: {sans}, size: 10.8pt, weight: 700, fill: rgb("{P['ink_soft']}"), it.body)
+  v(3pt)
+}}
+#show heading.where(level: 4): it => {{
+  v(6pt)
+  text(font: {sans}, size: 10.2pt, weight: 600, fill: rgb("{P['ink_muted']}"), it.body)
+  v(2pt)
+}}
+
+#set strong(delta: 130)
+#show strong: set text(fill: rgb("{P['primary']}"))
+#show link: underline
+#show link: set text(fill: rgb("{P['accent']}"))
+
+#show table: set text(size: 9pt, font: {sans}, fill: rgb("{P['ink']}"))
+#show table: set par(first-line-indent: 0em, justify: false, leading: 0.62em)
+#show table: it => block(width: 100%, it)
+
+#show raw.where(block: true): it => {{
+  block(width: 100%, inset: (x: 9pt, y: 7pt), radius: 3pt,
+    fill: rgb("{P['code_bg']}"), stroke: 0.5pt + rgb("{P['code_rule']}"),
+    text(font: {mono}, size: 8pt, fill: rgb("{P['ink_soft']}"), it))
+}}
+#show raw.where(block: false): it => {{
+  box(inset: (x: 3pt, y: 1.2pt), radius: 2pt, fill: rgb("{P['code_inline']}"),
+      text(font: {mono}, size: 8.8pt, fill: rgb("{P['secondary']}"), it))
+}}
+#show list: set par(first-line-indent: 0em)
+#show enum: set par(first-line-indent: 0em)
+"""
+
+    # ---------- 首页：紧凑作用域 ----------
+    # 注意：Typst 的 show 规则必须在顶层，不能放进 #[...] 内容块里
+    #（块内 set 有效、show 会报错）。因此这里把紧凑版的 show 规则写成
+    # 顶层 `#show ...: it => ...` 并放在首页内容之前，
+    # 补充材料段则用另一套 show 规则覆盖回来。
+    digest_block = f"""
+{header}
+// ---- 首页紧凑版式：覆盖前面的常规 show 规则 ----
+#show heading.where(level: 1): it => {{
+  v(4pt)
+  block(width: 100%,
+    text(font: {sans}, size: 10.2pt, weight: 700, fill: rgb("{P['primary']}"), it.body))
+  v(1.2pt)
+  line(length: 100%, stroke: 0.7pt + rgb("{P['primary']}"))
+  v(2.4pt)
+}}
+#show heading.where(level: 2): it => {{
+  v(4pt)
+  stack(dir: ltr, spacing: 5pt,
+    line(angle: 90deg, length: 0.82em, stroke: 2pt + rgb("{P['primary_line']}")),
+    text(font: {sans}, size: 9.7pt, weight: 700, fill: rgb("{P['secondary']}"), it.body),
+  )
+  v(1.8pt)
+}}
+#show heading.where(level: 3): it => {{
+  v(2.2pt)
+  text(font: {sans}, size: 9.1pt, weight: 700, fill: rgb("{P['ink_soft']}"), it.body)
+  v(0.8pt)
+}}
+#show table: set text(size: 8.4pt, font: {sans})
+#show table: set par(leading: 0.5em)
+#set text(size: 10pt)
+#set par(leading: 0.70em, spacing: 0.80em, first-line-indent: (amount: 0em, all: false))
+{digest_body}
+"""
+
+    # ---------- 补充材料：恢复常规版式 ----------
+    restore = f"""
+#pagebreak()
+// ---- 恢复常规版式 ----
+#set text(size: 10.5pt)
+#set par(leading: 0.82em, spacing: 1.1em, first-line-indent: (amount: 2em, all: true))
+#show heading.where(level: 1): it => {{
+  v(15pt)
+  block(width: 100%,
+    text(font: {sans}, size: 14.5pt, weight: 700, fill: rgb("{P['primary']}"), it.body))
+  v(2pt)
+  line(length: 100%, stroke: 1.4pt + rgb("{P['primary']}"))
+  v(7pt)
+}}
+#show heading.where(level: 2): it => {{
+  v(11pt)
+  block(width: 100%,
+    stack(dir: ltr, spacing: 8pt,
+      line(angle: 90deg, length: 0.95em, stroke: 2.6pt + rgb("{P['primary_line']}")),
+      text(font: {sans}, size: 11.8pt, weight: 700, fill: rgb("{P['secondary']}"), it.body),
+    ))
+  v(4pt)
+}}
+#show heading.where(level: 3): it => {{
+  v(8pt)
+  text(font: {sans}, size: 10.8pt, weight: 700, fill: rgb("{P['ink_soft']}"), it.body)
+  v(3pt)
+}}
+#show table: set text(size: 9pt, font: {sans})
+#show table: set par(leading: 0.62em)
+
+#align(center)[
+  #text(font: {sans}, size: 7.4pt, tracking: 3pt, fill: rgb("{P['ink_faint']}"))[SUPPLEMENTARY MATERIAL]
+  #v(2pt)
+  #text(font: {sans}, size: 10.5pt, weight: 700, fill: rgb("{P['ink_muted']}"))[补充材料 · 首页结论的展开依据]
+]
+#v(3pt)
+#line(length: 100%, stroke: 0.5pt + rgb("{P['rule']}"))
+#v(6pt)
+"""
+
+    supp = f"\n{restore}\n{supp_body}\n" if supp_body.strip() else ""
+    return f"{config}\n{digest_block}\n{supp}"
+
+
 def repr_typst(s: str) -> str:
     """把 Python 字符串转成 Typst 字符串字面量。"""
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -566,14 +805,24 @@ def main() -> int:
     ap.add_argument("--meta", default=None, help="封面元信息")
     ap.add_argument("--toc", action="store_true", help="生成目录（Typst outline）")
     ap.add_argument("--no-cover", action="store_true", help="不生成封面")
+    ap.add_argument(
+        "--digest",
+        action="store_true",
+        help="首页速览 + 补充材料模式：以 --- 分隔；前半紧凑排成一页，后半用常规版式",
+    )
     args = ap.parse_args()
 
     if not args.md.exists():
         print(f"! 输入不存在: {args.md}", file=sys.stderr)
         return 4
 
-    md = args.md.read_text(encoding="utf-8")
-    src = build_typst(md, title=args.title, meta=args.meta, toc=args.toc, cover=not args.no_cover)
+    # utf-8-sig：PowerShell 的 Set-Content -Encoding UTF8 会写 BOM，
+    # 残留的 \ufeff 会让首个标题的正则不匹配，标题退化成正文。
+    md = args.md.read_text(encoding="utf-8-sig")
+    if args.digest:
+        src = build_digest_typst(md, title=args.title, meta=args.meta, toc=args.toc, cover=False)
+    else:
+        src = build_typst(md, title=args.title, meta=args.meta, toc=args.toc, cover=not args.no_cover)
 
     if args.typ:
         args.typ.parent.mkdir(parents=True, exist_ok=True)
@@ -597,3 +846,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
